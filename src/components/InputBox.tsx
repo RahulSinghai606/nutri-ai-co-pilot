@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Camera, Type, Mic, Upload, Sparkles, X } from "lucide-react";
+import { Camera, Type, Mic, Upload, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceRecording } from "@/hooks/useVoiceRecording";
 
 interface InputBoxProps {
   onSubmit: (input: string) => void;
@@ -13,9 +14,12 @@ export const InputBox = ({ onSubmit, onImageUpload, isProcessing = false }: Inpu
   const [text, setText] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { isRecording, isTranscribing, toggleRecording } = useVoiceRecording((transcribedText) => {
+    setText(transcribedText);
+  });
 
   const handleSubmit = useCallback(() => {
     if (text.trim() && !isProcessing) {
@@ -54,11 +58,6 @@ export const InputBox = ({ onSubmit, onImageUpload, isProcessing = false }: Inpu
     if (file && onImageUpload) {
       onImageUpload(file);
     }
-  };
-
-  const handleVoiceClick = () => {
-    setIsRecording(!isRecording);
-    // Voice recording would be implemented here
   };
 
   const examplePrompts = [
@@ -101,6 +100,7 @@ export const InputBox = ({ onSubmit, onImageUpload, isProcessing = false }: Inpu
               size="sm"
               className="h-9 px-3 gap-2 text-muted-foreground hover:text-primary hover:bg-primary/10"
               onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing}
             >
               <Camera className="w-4 h-4" />
               <span className="hidden sm:inline text-sm">Photo</span>
@@ -118,13 +118,22 @@ export const InputBox = ({ onSubmit, onImageUpload, isProcessing = false }: Inpu
               size="sm"
               className={`h-9 px-3 gap-2 transition-colors ${
                 isRecording 
-                  ? "text-caution bg-caution/10" 
+                  ? "text-caution bg-caution/10 animate-pulse" 
+                  : isTranscribing
+                  ? "text-primary bg-primary/10"
                   : "text-muted-foreground hover:text-primary hover:bg-primary/10"
               }`}
-              onClick={handleVoiceClick}
+              onClick={toggleRecording}
+              disabled={isProcessing || isTranscribing}
             >
-              <Mic className={`w-4 h-4 ${isRecording ? "animate-pulse" : ""}`} />
-              <span className="hidden sm:inline text-sm">Voice</span>
+              {isTranscribing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Mic className={`w-4 h-4 ${isRecording ? "animate-pulse" : ""}`} />
+              )}
+              <span className="hidden sm:inline text-sm">
+                {isRecording ? "Recording..." : isTranscribing ? "Processing..." : "Voice"}
+              </span>
             </Button>
 
             <input
