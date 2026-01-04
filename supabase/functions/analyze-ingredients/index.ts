@@ -5,6 +5,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Input validation constants
+const MAX_INGREDIENTS_LENGTH = 5000; // 5KB max for text
+const MAX_IMAGE_BASE64_LENGTH = 7_000_000; // ~5MB decoded
+const VALID_TYPES = ["text", "image"] as const;
+
 const SYSTEM_PROMPT = `You are NutriSense AI, a world-class food scientist and nutritionist with deep expertise in food chemistry, toxicology, and consumer health. You analyze food ingredients with scientific precision while communicating in warm, accessible language.
 
 Your role is to:
@@ -56,23 +61,79 @@ Safety Guidelines:
 
 Be honest about uncertainty. Never make absolute health claims. Frame as information, not medical advice.`;
 
+function validateRequest(body: unknown): { ingredients?: string; imageBase64?: string; type: string } {
+  if (!body || typeof body !== "object") {
+    throw new Error("Invalid request body");
+  }
+
+  const { ingredients, imageBase64, type } = body as Record<string, unknown>;
+  const requestType = typeof type === "string" ? type : "text";
+
+  // Validate type
+  if (!VALID_TYPES.includes(requestType as typeof VALID_TYPES[number])) {
+    throw new Error("Invalid type. Must be 'text' or 'image'");
+  }
+
+  // Validate based on type
+  if (requestType === "image") {
+    if (!imageBase64 || typeof imageBase64 !== "string") {
+      throw new Error("Image data is required for image analysis");
+    }
+    if (imageBase64.length > MAX_IMAGE_BASE64_LENGTH) {
+      throw new Error("Image size exceeds maximum allowed (5MB)");
+    }
+    // Basic base64 format validation
+    const base64Pattern = /^(data:image\/[a-z]+;base64,)?[A-Za-z0-9+/=]+$/;
+    const dataToCheck = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+    if (!base64Pattern.test(dataToCheck.substring(0, 100))) {
+      throw new Error("Invalid image format");
+    }
+  } else {
+    if (!ingredients || typeof ingredients !== "string") {
+      throw new Error("Ingredients text is required");
+    }
+    if (ingredients.length > MAX_INGREDIENTS_LENGTH) {
+      throw new Error("Ingredients text exceeds maximum length (5000 characters)");
+    }
+    if (ingredients.trim().length === 0) {
+      throw new Error("Ingredients text cannot be empty");
+    }
+  }
+
+  return {
+    ingredients: typeof ingredients === "string" ? ingredients : undefined,
+    imageBase64: typeof imageBase64 === "string" ? imageBase64 : undefined,
+    type: requestType,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { ingredients, imageBase64, type } = await req.json();
+    // Parse and validate request body
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { ingredients, imageBase64, type } = validateRequest(body);
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+      throw new Error("Service configuration error");
     }
 
-    let userContent: any[];
+    let userContent: unknown[];
     
     if (type === "image" && imageBase64) {
-      // Image analysis
       userContent = [
         {
           type: "text",
@@ -86,7 +147,6 @@ serve(async (req) => {
         }
       ];
     } else {
-      // Text analysis
       userContent = [
         {
           type: "text",
@@ -95,8 +155,7 @@ serve(async (req) => {
       ];
     }
 
-    console.log("Sending request to Lovable AI Gateway...");
-    console.log("Request type:", type || "text");
+    console.log("Processing analysis request, type:", type);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -115,8 +174,7 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
+      console.error("AI Gateway error:", response.status);
       
       if (response.status === 429) {
         return new Response(
@@ -130,39 +188,35 @@ serve(async (req) => {
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      throw new Error(`AI Gateway error: ${response.status}`);
+      throw new Error("Analysis service temporarily unavailable");
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
     
     if (!content) {
-      throw new Error("No response from AI");
+      throw new Error("No analysis generated");
     }
 
-    console.log("Raw AI response:", content.substring(0, 500));
+    console.log("Analysis response received");
 
-    // Parse JSON from response (handle markdown code blocks)
+    // Parse JSON from response
     let analysisResult;
     try {
-      // Remove markdown code blocks if present
       const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       analysisResult = JSON.parse(jsonStr);
-    } catch (parseError) {
-      console.error("JSON parse error:", parseError);
-      // Try to extract JSON from the response
+    } catch {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         analysisResult = JSON.parse(jsonMatch[0]);
       } else {
-        throw new Error("Failed to parse AI response as JSON");
+        throw new Error("Failed to process analysis");
       }
     }
 
-    // Add unique ID
     analysisResult.id = `analysis-${Date.now()}`;
 
-    console.log("Analysis complete:", analysisResult.productName || "Unknown product");
+    console.log("Analysis complete");
 
     return new Response(JSON.stringify(analysisResult), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -170,10 +224,15 @@ serve(async (req) => {
 
   } catch (error: unknown) {
     console.error("Error in analyze-ingredients:", error);
+    // Return generic error message to client
     const message = error instanceof Error ? error.message : "Analysis failed";
+    // Only return specific validation errors, not internal details
+    const safeMessage = message.includes("exceeds") || message.includes("required") || message.includes("Invalid") || message.includes("cannot be empty")
+      ? message 
+      : "Analysis failed. Please try again.";
     return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: safeMessage }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

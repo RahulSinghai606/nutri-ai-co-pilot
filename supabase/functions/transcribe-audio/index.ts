@@ -5,26 +5,63 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Input validation constants
+const MAX_AUDIO_BASE64_LENGTH = 13_000_000; // ~10MB decoded
+
+function validateRequest(body: unknown): { audioBase64: string } {
+  if (!body || typeof body !== "object") {
+    throw new Error("Invalid request body");
+  }
+
+  const { audioBase64 } = body as Record<string, unknown>;
+
+  if (!audioBase64 || typeof audioBase64 !== "string") {
+    throw new Error("Audio data is required");
+  }
+
+  if (audioBase64.length > MAX_AUDIO_BASE64_LENGTH) {
+    throw new Error("Audio size exceeds maximum allowed (10MB)");
+  }
+
+  if (audioBase64.trim().length === 0) {
+    throw new Error("Audio data cannot be empty");
+  }
+
+  // Basic base64 validation
+  const base64Pattern = /^[A-Za-z0-9+/=]+$/;
+  if (!base64Pattern.test(audioBase64.substring(0, 100))) {
+    throw new Error("Invalid audio format");
+  }
+
+  return { audioBase64 };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { audioBase64 } = await req.json();
+    // Parse and validate request body
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { audioBase64 } = validateRequest(body);
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+      throw new Error("Service configuration error");
     }
 
-    if (!audioBase64) {
-      throw new Error("No audio data provided");
-    }
+    console.log("Processing transcription request");
 
-    console.log("Transcribing audio...");
-
-    // Use Gemini for audio transcription with text description
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -56,9 +93,8 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
-      throw new Error(`Transcription failed: ${response.status}`);
+      console.error("AI Gateway error:", response.status);
+      throw new Error("Transcription service temporarily unavailable");
     }
 
     const data = await response.json();
@@ -68,7 +104,7 @@ serve(async (req) => {
       throw new Error("No transcription generated");
     }
 
-    console.log("Transcription complete:", transcription.substring(0, 100));
+    console.log("Transcription complete");
 
     return new Response(JSON.stringify({ text: transcription }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -77,9 +113,13 @@ serve(async (req) => {
   } catch (error: unknown) {
     console.error("Error in transcribe-audio:", error);
     const message = error instanceof Error ? error.message : "Transcription failed";
+    // Only return specific validation errors
+    const safeMessage = message.includes("exceeds") || message.includes("required") || message.includes("cannot be empty") || message.includes("Invalid")
+      ? message 
+      : "Transcription failed. Please try again.";
     return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: safeMessage }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
