@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, ChevronDown } from "lucide-react";
-import { Header, HowItWorks, Footer } from "@/components/Layout";
+import { Header, HowItWorks, About, Footer } from "@/components/Layout";
 import { FloatingBlobs } from "@/components/FloatingBlobs";
 import { InputBox } from "@/components/InputBox";
 import { DemoSelector } from "@/components/DemoSelector";
@@ -100,6 +100,7 @@ const Index = () => {
               </section>
 
               <HowItWorks />
+              <About />
               <Footer />
             </motion.div>
           ) : showResults ? (
