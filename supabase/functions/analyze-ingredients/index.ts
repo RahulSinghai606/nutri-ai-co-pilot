@@ -8,6 +8,7 @@ const corsHeaders = {
 // Input validation constants
 const MAX_INGREDIENTS_LENGTH = 5000; // 5KB max for text
 const MAX_IMAGE_BASE64_LENGTH = 7_000_000; // ~5MB decoded
+const MAX_QUERY_LENGTH = 500;
 const VALID_TYPES = ["text", "image"] as const;
 
 const SYSTEM_PROMPT = `You are NutriSense AI, a world-class food scientist and nutritionist with deep expertise in food chemistry, toxicology, and consumer health. You analyze food ingredients with scientific precision while communicating in warm, accessible language.
@@ -18,12 +19,15 @@ Your role is to:
 3. Explain tradeoffs - why ingredients are used and their concerns
 4. Detect product context (baby food, snack, energy drink, etc.) and adjust analysis accordingly
 5. Communicate uncertainty honestly when research is mixed
+6. Provide a health score (0-100) and quick actionable advice
 
 RESPONSE FORMAT (JSON):
 {
   "productName": "Detected product name or null",
   "verdict": "safe" | "caution" | "concern",
   "confidence": 0-100,
+  "healthScore": 0-100,
+  "quickAdvice": ["Short actionable tip 1", "Tip 2", "Tip 3", "Tip 4"],
   "summary": "2-3 sentence natural language summary",
   "detectedContext": "Product type you detected",
   "contextNote": "Why you focused on certain aspects",
@@ -53,6 +57,17 @@ RESPONSE FORMAT (JSON):
   ]
 }
 
+Health Score Guidelines:
+- 80-100: Clean ingredients, minimal processing, no concerns
+- 60-79: Generally fine, some minor concerns or highly processed
+- 40-59: Moderate concerns, limit consumption
+- 0-39: Significant concerns, avoid or rarely consume
+
+Quick Advice Guidelines:
+- Provide 3-5 short, actionable tips (max 6 words each)
+- Focus on practical recommendations
+- Include who should be cautious if applicable
+
 Safety Guidelines:
 - "safe": Well-established as harmless at normal consumption
 - "moderate": Some concerns exist, or certain populations should be aware
@@ -61,17 +76,22 @@ Safety Guidelines:
 
 Be honest about uncertainty. Never make absolute health claims. Frame as information, not medical advice.`;
 
-function validateRequest(body: unknown): { ingredients?: string; imageBase64?: string; type: string } {
+function validateRequest(body: unknown): { ingredients?: string; imageBase64?: string; userQuery?: string; type: string } {
   if (!body || typeof body !== "object") {
     throw new Error("Invalid request body");
   }
 
-  const { ingredients, imageBase64, type } = body as Record<string, unknown>;
+  const { ingredients, imageBase64, type, userQuery } = body as Record<string, unknown>;
   const requestType = typeof type === "string" ? type : "text";
 
   // Validate type
   if (!VALID_TYPES.includes(requestType as typeof VALID_TYPES[number])) {
     throw new Error("Invalid type. Must be 'text' or 'image'");
+  }
+
+  // Validate user query if provided
+  if (userQuery !== undefined && typeof userQuery === "string" && userQuery.length > MAX_QUERY_LENGTH) {
+    throw new Error(`Query exceeds maximum length (${MAX_QUERY_LENGTH} characters)`);
   }
 
   // Validate based on type
@@ -103,6 +123,7 @@ function validateRequest(body: unknown): { ingredients?: string; imageBase64?: s
   return {
     ingredients: typeof ingredients === "string" ? ingredients : undefined,
     imageBase64: typeof imageBase64 === "string" ? imageBase64 : undefined,
+    userQuery: typeof userQuery === "string" ? userQuery : undefined,
     type: requestType,
   };
 }
@@ -124,7 +145,7 @@ serve(async (req) => {
       );
     }
 
-    const { ingredients, imageBase64, type } = validateRequest(body);
+    const { ingredients, imageBase64, userQuery, type } = validateRequest(body);
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -134,10 +155,14 @@ serve(async (req) => {
     let userContent: unknown[];
     
     if (type === "image" && imageBase64) {
+      const textPrompt = userQuery 
+        ? `Analyze the ingredients shown in this product label image. The user also asks: "${userQuery}". Extract all ingredients and provide a complete analysis addressing their question.`
+        : "Analyze the ingredients shown in this product label image. Extract all ingredients and provide a complete analysis.";
+      
       userContent = [
         {
           type: "text",
-          text: "Analyze the ingredients shown in this product label image. Extract all ingredients and provide a complete analysis."
+          text: textPrompt
         },
         {
           type: "image_url",
@@ -147,15 +172,19 @@ serve(async (req) => {
         }
       ];
     } else {
+      const textPrompt = userQuery && userQuery !== ingredients
+        ? `Analyze these food ingredients:\n\n${ingredients}\n\nThe user also asks: "${userQuery}"\n\nProvide a comprehensive analysis in the specified JSON format, addressing their question.`
+        : `Analyze these food ingredients:\n\n${ingredients}\n\nProvide a comprehensive analysis in the specified JSON format.`;
+      
       userContent = [
         {
           type: "text",
-          text: `Analyze these food ingredients:\n\n${ingredients}\n\nProvide a comprehensive analysis in the specified JSON format.`
+          text: textPrompt
         }
       ];
     }
 
-    console.log("Processing analysis request, type:", type);
+    console.log("Processing analysis request, type:", type, "hasQuery:", !!userQuery);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -215,6 +244,14 @@ serve(async (req) => {
     }
 
     analysisResult.id = `analysis-${Date.now()}`;
+    
+    // Ensure healthScore and quickAdvice exist
+    if (!analysisResult.healthScore) {
+      analysisResult.healthScore = Math.round(analysisResult.confidence * 0.9);
+    }
+    if (!analysisResult.quickAdvice || !Array.isArray(analysisResult.quickAdvice)) {
+      analysisResult.quickAdvice = ["Check the full analysis for details"];
+    }
 
     console.log("Analysis complete");
 

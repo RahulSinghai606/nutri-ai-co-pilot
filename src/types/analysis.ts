@@ -25,7 +25,9 @@ export interface AnalysisResult {
   productName?: string;
   verdict: 'safe' | 'caution' | 'concern';
   confidence: number;
+  healthScore: number; // 0-100
   summary: string;
+  quickAdvice: string[]; // Short actionable tips
   categories: IngredientCategory[];
   tradeoffs: Tradeoff[];
   contextNote: string;
