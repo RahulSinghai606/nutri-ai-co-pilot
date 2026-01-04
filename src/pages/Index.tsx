@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Header, HowItWorks, Footer } from "@/components/Layout";
 import { FloatingBlobs } from "@/components/FloatingBlobs";
 import { InputBox } from "@/components/InputBox";
@@ -10,6 +10,7 @@ import { VerdictCard } from "@/components/VerdictCard";
 import { IngredientBreakdown } from "@/components/IngredientBreakdown";
 import { TradeoffsCard } from "@/components/TradeoffsCard";
 import { ConversationPanel } from "@/components/ConversationPanel";
+import { HealthScoreCard } from "@/components/HealthScoreCard";
 import { Button } from "@/components/ui/button";
 import { demoScenarios, suggestedQuestions } from "@/data/demoData";
 import { useIngredientAnalysis } from "@/hooks/useIngredientAnalysis";
@@ -21,16 +22,21 @@ const Index = () => {
     ingredients,
     messages,
     isAITyping,
-    analyzeText,
-    analyzeImage,
+    analyze,
     sendMessage,
     reset,
   } = useIngredientAnalysis();
 
   const [isConversationOpen, setIsConversationOpen] = useState(false);
+  const [showFullAnalysis, setShowFullAnalysis] = useState(false);
 
   const handleSelectDemo = (demo: typeof demoScenarios[0]) => {
-    analyzeText(demo.input);
+    analyze({ text: demo.input });
+  };
+
+  const handleAnalyze = (input: { text?: string; imageBase64?: string }) => {
+    setShowFullAnalysis(false);
+    analyze(input);
   };
 
   const showResults = analysisStage === "complete" && analysisResult;
@@ -77,7 +83,7 @@ const Index = () => {
                   </p>
                 </motion.div>
 
-                <InputBox onSubmit={analyzeText} onImageUpload={analyzeImage} />
+                <InputBox onAnalyze={handleAnalyze} isProcessing={analysisStage !== "none"} />
                 
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -132,52 +138,96 @@ const Index = () => {
                   </motion.h1>
                 )}
 
-                {/* Results layout */}
-                <div className="flex flex-col lg:flex-row gap-6">
-                  {/* Main content */}
-                  <div className="flex-1 space-y-6">
-                    <VerdictCard
+                {/* Health Score Card - Quick View */}
+                {!showFullAnalysis && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-6"
+                  >
+                    <HealthScoreCard
+                      score={analysisResult.healthScore || Math.round(analysisResult.confidence * 0.9)}
                       verdict={analysisResult.verdict}
-                      confidence={analysisResult.confidence}
+                      quickAdvice={analysisResult.quickAdvice || ["Check full analysis for details"]}
                       summary={analysisResult.summary}
-                      contextNote={analysisResult.contextNote}
-                      detectedContext={analysisResult.detectedContext}
+                      onShowDetails={() => setShowFullAnalysis(true)}
                     />
+                  </motion.div>
+                )}
 
-                    <IngredientBreakdown categories={analysisResult.categories} />
+                {/* Full Analysis */}
+                <AnimatePresence>
+                  {showFullAnalysis && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                    >
+                      {/* Results layout */}
+                      <div className="flex flex-col lg:flex-row gap-6">
+                        {/* Main content */}
+                        <div className="flex-1 space-y-6">
+                          <VerdictCard
+                            verdict={analysisResult.verdict}
+                            confidence={analysisResult.confidence}
+                            summary={analysisResult.summary}
+                            contextNote={analysisResult.contextNote}
+                            detectedContext={analysisResult.detectedContext}
+                          />
 
-                    {analysisResult.tradeoffs.length > 0 && (
-                      <TradeoffsCard tradeoffs={analysisResult.tradeoffs} />
-                    )}
-                  </div>
+                          <IngredientBreakdown categories={analysisResult.categories} />
 
-                  {/* Conversation panel - desktop */}
-                  <div className="hidden lg:block w-96">
-                    <div className="sticky top-24">
-                      <div className="glass-card rounded-2xl overflow-hidden h-[600px]">
+                          {analysisResult.tradeoffs.length > 0 && (
+                            <TradeoffsCard tradeoffs={analysisResult.tradeoffs} />
+                          )}
+                        </div>
+
+                        {/* Conversation panel - desktop */}
+                        <div className="hidden lg:block w-96">
+                          <div className="sticky top-24">
+                            <div className="glass-card rounded-2xl overflow-hidden h-[600px]">
+                              <ConversationPanel
+                                messages={messages}
+                                suggestedQuestions={suggestedQuestions}
+                                onSendMessage={sendMessage}
+                                isLoading={isAITyping}
+                                isOpen={true}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Mobile conversation panel */}
+                      <div className="lg:hidden mt-6">
                         <ConversationPanel
                           messages={messages}
                           suggestedQuestions={suggestedQuestions}
                           onSendMessage={sendMessage}
                           isLoading={isAITyping}
-                          isOpen={true}
+                          isOpen={isConversationOpen}
+                          onToggle={() => setIsConversationOpen(!isConversationOpen)}
                         />
                       </div>
-                    </div>
-                  </div>
-                </div>
 
-                {/* Mobile conversation panel */}
-                <div className="lg:hidden">
-                  <ConversationPanel
-                    messages={messages}
-                    suggestedQuestions={suggestedQuestions}
-                    onSendMessage={sendMessage}
-                    isLoading={isAITyping}
-                    isOpen={isConversationOpen}
-                    onToggle={() => setIsConversationOpen(!isConversationOpen)}
-                  />
-                </div>
+                      {/* Collapse button */}
+                      <motion.div
+                        className="flex justify-center mt-6"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                      >
+                        <Button
+                          variant="ghost"
+                          onClick={() => setShowFullAnalysis(false)}
+                          className="gap-2 text-muted-foreground"
+                        >
+                          <ChevronDown className="w-4 h-4 rotate-180" />
+                          Show Quick View
+                        </Button>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.div>
           ) : (

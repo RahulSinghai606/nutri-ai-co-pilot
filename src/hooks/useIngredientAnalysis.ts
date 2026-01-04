@@ -3,6 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { AnalysisResult, AnalysisStage, Message } from "@/types/analysis";
 import { toast } from "sonner";
 
+interface AnalyzeInput {
+  text?: string;
+  imageBase64?: string;
+}
+
 export const useIngredientAnalysis = () => {
   const [analysisStage, setAnalysisStage] = useState<AnalysisStage>("none");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -10,17 +15,16 @@ export const useIngredientAnalysis = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isAITyping, setIsAITyping] = useState(false);
 
-  const parseIngredients = (text: string): string[] => {
-    return text
-      .split(/,|;|\n/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  };
+  const analyze = async (input: AnalyzeInput) => {
+    const { text, imageBase64 } = input;
+    
+    if (!text && !imageBase64) {
+      toast.error("Please provide ingredients text or an image");
+      return;
+    }
 
-  const analyzeText = async (input: string) => {
-    const parsed = parseIngredients(input);
-    setIngredients(parsed);
     setAnalysisStage("reading");
+    setIngredients(imageBase64 ? ["Reading image..."] : (text?.split(/,|;|\n/).map(s => s.trim()).filter(Boolean) || []));
 
     try {
       // Progress through stages while waiting for AI
@@ -28,57 +32,31 @@ export const useIngredientAnalysis = () => {
       setTimeout(() => setAnalysisStage("reasoning"), 3000);
 
       const { data, error } = await supabase.functions.invoke("analyze-ingredients", {
-        body: { ingredients: input, type: "text" },
-      });
-
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-
-      setAnalysisStage("complete");
-      setAnalysisResult(data);
-    } catch (error) {
-      console.error("Analysis failed:", error);
-      toast.error("Analysis failed. Please try again.");
-      setAnalysisStage("none");
-      setIngredients([]);
-    }
-  };
-
-  const analyzeImage = async (file: File) => {
-    setAnalysisStage("reading");
-    setIngredients(["Reading image..."]);
-
-    try {
-      // Convert file to base64
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      setTimeout(() => setAnalysisStage("analyzing"), 1500);
-      setTimeout(() => setAnalysisStage("reasoning"), 3500);
-
-      const { data, error } = await supabase.functions.invoke("analyze-ingredients", {
-        body: { imageBase64: base64, type: "image" },
+        body: { 
+          ingredients: text || undefined,
+          imageBase64: imageBase64 || undefined,
+          type: imageBase64 ? "image" : "text",
+          userQuery: text || undefined,
+        },
       });
 
       if (error) throw error;
       if (data.error) throw new Error(data.error);
 
       // Extract ingredients from result for display
-      const allIngredients = data.categories?.flatMap(
-        (cat: { ingredients: { commonName: string }[] }) => 
-          cat.ingredients.map((i) => i.commonName)
-      ) || [];
-      setIngredients(allIngredients);
+      if (imageBase64) {
+        const allIngredients = data.categories?.flatMap(
+          (cat: { ingredients: { commonName: string }[] }) => 
+            cat.ingredients.map((i) => i.commonName)
+        ) || [];
+        setIngredients(allIngredients);
+      }
 
       setAnalysisStage("complete");
       setAnalysisResult(data);
     } catch (error) {
-      console.error("Image analysis failed:", error);
-      toast.error("Image analysis failed. Please try again.");
+      console.error("Analysis failed:", error);
+      toast.error("Analysis failed. Please try again.");
       setAnalysisStage("none");
       setIngredients([]);
     }
@@ -139,8 +117,7 @@ export const useIngredientAnalysis = () => {
     ingredients,
     messages,
     isAITyping,
-    analyzeText,
-    analyzeImage,
+    analyze,
     sendMessage,
     reset,
   };
