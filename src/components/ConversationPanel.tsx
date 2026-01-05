@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, X, MessageCircle } from "lucide-react";
+import { Send, MessageCircle, ArrowLeft } from "lucide-react";
 import { Message } from "@/types/analysis";
 import { Button } from "@/components/ui/button";
 
@@ -77,12 +77,15 @@ export const ConversationPanel = ({
                   <span className="text-lg">💬</span>
                   <h3 className="font-display text-lg text-foreground">Ask me anything</h3>
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
                   onClick={onToggle}
-                  className="lg:hidden p-2 hover:bg-secondary rounded-lg transition-colors"
+                  className="lg:hidden gap-2"
                 >
-                  <X className="w-5 h-5 text-muted-foreground" />
-                </button>
+                  <ArrowLeft className="w-4 h-4" />
+                  Back
+                </Button>
               </div>
 
               {/* Suggested questions */}

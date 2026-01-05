@@ -32,11 +32,13 @@ export const useIngredientAnalysis = () => {
       setTimeout(() => setAnalysisStage("reasoning"), 3000);
 
       const { data, error } = await supabase.functions.invoke("analyze-ingredients", {
-        body: { 
-          ingredients: text || undefined,
+        body: {
+          ingredients: imageBase64 ? undefined : (text || undefined),
           imageBase64: imageBase64 || undefined,
           type: imageBase64 ? "image" : "text",
-          userQuery: text || undefined,
+          // Only treat the text as a "question" when the user is analyzing an image.
+          // For plain text ingredient lists, sending userQuery caused 400s due to the 500-char limit.
+          userQuery: imageBase64 ? (text || undefined) : undefined,
         },
       });
 
