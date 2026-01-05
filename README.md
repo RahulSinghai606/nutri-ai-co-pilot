@@ -391,9 +391,9 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
         <sub><b>Rahul Singhai</b></sub>
       </a>
       <br />
-      <sub>GenAI Developer @ Kellton Tech</sub>
+      <sub>MBA @ TISS Mumbai</sub>
       <br />
-      <sub>MBA Business Analytics @ Chandigarh University</sub>
+      <sub>Anshu Sharma (MBA Business Analytics) @ Chandigarh University</sub>
     </td>
   </tr>
 </table>
