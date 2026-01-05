@@ -11,6 +11,7 @@ import { IngredientBreakdown } from "@/components/IngredientBreakdown";
 import { TradeoffsCard } from "@/components/TradeoffsCard";
 import { ConversationPanel } from "@/components/ConversationPanel";
 import { HealthScoreCard } from "@/components/HealthScoreCard";
+import { ShareButton } from "@/components/ShareButton";
 import { Button } from "@/components/ui/button";
 import { demoScenarios, suggestedQuestions } from "@/data/demoData";
 import { useIngredientAnalysis } from "@/hooks/useIngredientAnalysis";
@@ -112,11 +113,11 @@ const Index = () => {
               className="min-h-screen pt-24 pb-12"
             >
               <div className="max-w-5xl mx-auto px-4">
-                {/* Back button */}
+                {/* Back button and share */}
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="mb-6"
+                  className="mb-6 flex items-center justify-between"
                 >
                   <Button
                     variant="ghost"
@@ -126,6 +127,7 @@ const Index = () => {
                     <ArrowLeft className="w-4 h-4" />
                     Analyze another
                   </Button>
+                  <ShareButton analysis={analysisResult} />
                 </motion.div>
 
                 {/* Product name */}
