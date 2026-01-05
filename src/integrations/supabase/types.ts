@@ -14,7 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      shared_analyses: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          health_score: number | null
+          id: string
+          ingredients: Json
+          product_name: string | null
+          quick_advice: string | null
+          share_code: string
+          suggested_questions: Json | null
+          tradeoffs: Json | null
+          verdict: string
+          verdict_explanation: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          health_score?: number | null
+          id?: string
+          ingredients?: Json
+          product_name?: string | null
+          quick_advice?: string | null
+          share_code?: string
+          suggested_questions?: Json | null
+          tradeoffs?: Json | null
+          verdict: string
+          verdict_explanation?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          health_score?: number | null
+          id?: string
+          ingredients?: Json
+          product_name?: string | null
+          quick_advice?: string | null
+          share_code?: string
+          suggested_questions?: Json | null
+          tradeoffs?: Json | null
+          verdict?: string
+          verdict_explanation?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
