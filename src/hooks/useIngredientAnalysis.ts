@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AnalysisResult, AnalysisStage, Message } from "@/types/analysis";
 import { toast } from "sonner";
@@ -54,7 +54,7 @@ export const useIngredientAnalysis = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isAITyping, setIsAITyping] = useState(false);
 
-  const analyze = useCallback(async (input: AnalyzeInput) => {
+  const analyze = async (input: AnalyzeInput) => {
     const { text, imageBase64 } = input;
     
     if (!text && !imageBase64) {
@@ -67,8 +67,8 @@ export const useIngredientAnalysis = () => {
 
     try {
       // Progress through stages while waiting for AI
-      const stageTimer1 = setTimeout(() => setAnalysisStage("analyzing"), 1500);
-      const stageTimer2 = setTimeout(() => setAnalysisStage("reasoning"), 3000);
+      setTimeout(() => setAnalysisStage("analyzing"), 1500);
+      setTimeout(() => setAnalysisStage("reasoning"), 3000);
 
       const performAnalysis = async () => {
         const { data, error } = await supabase.functions.invoke("analyze-ingredients", {
@@ -88,10 +88,6 @@ export const useIngredientAnalysis = () => {
 
       // Use retry wrapper for the API call
       const data = await withRetry(performAnalysis);
-      
-      // Clear timers on success
-      clearTimeout(stageTimer1);
-      clearTimeout(stageTimer2);
 
       // Extract ingredients from result for display
       if (imageBase64) {
@@ -122,9 +118,9 @@ export const useIngredientAnalysis = () => {
       setAnalysisStage("none");
       setIngredients([]);
     }
-  }, []);
+  };
 
-  const sendMessage = useCallback(async (message: string) => {
+  const sendMessage = async (message: string) => {
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -171,14 +167,14 @@ export const useIngredientAnalysis = () => {
     } finally {
       setIsAITyping(false);
     }
-  }, [analysisResult, messages]);
+  };
 
-  const reset = useCallback(() => {
+  const reset = () => {
     setAnalysisStage("none");
     setAnalysisResult(null);
     setIngredients([]);
     setMessages([]);
-  }, []);
+  };
 
   return {
     analysisStage,
