@@ -64,7 +64,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      delete_shared_analysis_by_code: {
+        Args: { p_share_code: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
