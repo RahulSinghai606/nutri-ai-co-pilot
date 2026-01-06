@@ -5,6 +5,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Allowed origins for monitoring (add your production domains here)
+const KNOWN_ORIGINS = [
+  "lovableproject.com",
+  "lovable.app",
+  "localhost",
+];
+
+function logOrigin(req: Request) {
+  const origin = req.headers.get("origin");
+  const referer = req.headers.get("referer");
+  
+  if (origin) {
+    const isKnownOrigin = KNOWN_ORIGINS.some(known => origin.includes(known));
+    if (!isKnownOrigin) {
+      console.warn("Request from external origin:", origin, "referer:", referer);
+    }
+  }
+}
+
 // Input validation constants
 const MAX_QUESTION_LENGTH = 1000;
 const MAX_CONVERSATION_HISTORY = 10;
@@ -68,6 +87,9 @@ function validateRequest(body: unknown): {
 }
 
 serve(async (req) => {
+  // Log origin for monitoring
+  logOrigin(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

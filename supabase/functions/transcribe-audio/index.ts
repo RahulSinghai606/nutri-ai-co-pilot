@@ -5,6 +5,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Allowed origins for monitoring (add your production domains here)
+const KNOWN_ORIGINS = [
+  "lovableproject.com",
+  "lovable.app",
+  "localhost",
+];
+
+function logOrigin(req: Request) {
+  const origin = req.headers.get("origin");
+  const referer = req.headers.get("referer");
+  
+  if (origin) {
+    const isKnownOrigin = KNOWN_ORIGINS.some(known => origin.includes(known));
+    if (!isKnownOrigin) {
+      console.warn("Request from external origin:", origin, "referer:", referer);
+    }
+  }
+}
+
 // Input validation constants
 const MAX_AUDIO_BASE64_LENGTH = 13_000_000; // ~10MB decoded
 
@@ -37,6 +56,9 @@ function validateRequest(body: unknown): { audioBase64: string } {
 }
 
 serve(async (req) => {
+  // Log origin for monitoring
+  logOrigin(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

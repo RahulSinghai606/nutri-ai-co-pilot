@@ -1,15 +1,72 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Allowed origins for monitoring (add your production domains here)
+const KNOWN_ORIGINS = [
+  "lovableproject.com",
+  "lovable.app",
+  "localhost",
+];
+
+function logOrigin(req: Request) {
+  const origin = req.headers.get("origin");
+  const referer = req.headers.get("referer");
+  
+  if (origin) {
+    const isKnownOrigin = KNOWN_ORIGINS.some(known => origin.includes(known));
+    if (!isKnownOrigin) {
+      console.warn("Request from external origin:", origin, "referer:", referer);
+    }
+  }
+}
+
 // Input validation constants
 const MAX_INGREDIENTS_LENGTH = 5000; // 5KB max for text
 const MAX_IMAGE_BASE64_LENGTH = 7_000_000; // ~5MB decoded
 const MAX_QUERY_LENGTH = 500;
 const VALID_TYPES = ["text", "image"] as const;
+
+// Zod schemas for AI response validation
+const IngredientSchema = z.object({
+  commonName: z.string().max(200).default("Unknown"),
+  scientificName: z.string().max(200).optional().nullable(),
+  safety: z.enum(["safe", "moderate", "concern", "unknown"]).default("unknown"),
+  explanation: z.string().max(1000).default("No explanation provided"),
+  detailedInfo: z.string().max(2000).optional().nullable(),
+});
+
+const CategorySchema = z.object({
+  name: z.string().max(100).default("Other"),
+  icon: z.string().max(20).default("📦"),
+  aiNote: z.string().max(1000).optional().nullable(),
+  ingredients: z.array(IngredientSchema).default([]),
+});
+
+const TradeoffSchema = z.object({
+  ingredient: z.string().max(200).default("Unknown"),
+  why: z.string().max(1000).default(""),
+  concern: z.string().max(1000).default(""),
+  reality: z.string().max(1000).default(""),
+});
+
+const AnalysisResultSchema = z.object({
+  productName: z.string().max(300).optional().nullable(),
+  verdict: z.enum(["safe", "caution", "concern"]).default("caution"),
+  confidence: z.number().min(0).max(100).default(50),
+  healthScore: z.number().min(0).max(100).default(50),
+  summary: z.string().max(2000).default("Analysis complete."),
+  detectedContext: z.string().max(200).optional().nullable(),
+  contextNote: z.string().max(500).optional().nullable(),
+  quickAdvice: z.array(z.string().max(200)).max(10).default(["Review the full analysis for details"]),
+  categories: z.array(CategorySchema).default([]),
+  tradeoffs: z.array(TradeoffSchema).default([]),
+  suggestedQuestions: z.array(z.string().max(200)).max(10).optional(),
+});
 
 const SYSTEM_PROMPT = `You are NutriSense AI, a world-class food scientist and nutritionist with deep expertise in food chemistry, toxicology, and consumer health. You analyze food ingredients with scientific precision while communicating in warm, accessible language.
 
@@ -128,7 +185,39 @@ function validateRequest(body: unknown): { ingredients?: string; imageBase64?: s
   };
 }
 
+function validateAndSanitizeResult(rawResult: unknown): z.infer<typeof AnalysisResultSchema> {
+  try {
+    // Parse with Zod - will apply defaults for missing fields and truncate long strings
+    const validated = AnalysisResultSchema.parse(rawResult);
+    return validated;
+  } catch (error) {
+    console.error("AI response validation failed:", error);
+    
+    // If validation fails completely, return a safe default
+    if (rawResult && typeof rawResult === "object") {
+      const raw = rawResult as Record<string, unknown>;
+      return {
+        productName: typeof raw.productName === "string" ? raw.productName.slice(0, 300) : null,
+        verdict: "caution",
+        confidence: typeof raw.confidence === "number" ? Math.min(100, Math.max(0, raw.confidence)) : 50,
+        healthScore: typeof raw.healthScore === "number" ? Math.min(100, Math.max(0, raw.healthScore)) : 50,
+        summary: typeof raw.summary === "string" ? raw.summary.slice(0, 2000) : "Analysis complete. Review details below.",
+        quickAdvice: Array.isArray(raw.quickAdvice) 
+          ? raw.quickAdvice.filter((a): a is string => typeof a === "string").slice(0, 10).map(a => a.slice(0, 200))
+          : ["Review the full analysis for details"],
+        categories: [],
+        tradeoffs: [],
+      };
+    }
+    
+    throw new Error("Failed to process analysis result");
+  }
+}
+
 serve(async (req) => {
+  // Log origin for monitoring
+  logOrigin(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -230,32 +319,31 @@ serve(async (req) => {
     console.log("Analysis response received");
 
     // Parse JSON from response
-    let analysisResult;
+    let rawAnalysisResult;
     try {
       const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      analysisResult = JSON.parse(jsonStr);
+      rawAnalysisResult = JSON.parse(jsonStr);
     } catch {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        analysisResult = JSON.parse(jsonMatch[0]);
+        rawAnalysisResult = JSON.parse(jsonMatch[0]);
       } else {
         throw new Error("Failed to process analysis");
       }
     }
 
-    analysisResult.id = `analysis-${Date.now()}`;
+    // Validate and sanitize the AI response with Zod
+    const analysisResult = validateAndSanitizeResult(rawAnalysisResult);
     
-    // Ensure healthScore and quickAdvice exist
-    if (!analysisResult.healthScore) {
-      analysisResult.healthScore = Math.round(analysisResult.confidence * 0.9);
-    }
-    if (!analysisResult.quickAdvice || !Array.isArray(analysisResult.quickAdvice)) {
-      analysisResult.quickAdvice = ["Check the full analysis for details"];
-    }
+    // Add unique ID
+    const finalResult = {
+      ...analysisResult,
+      id: `analysis-${Date.now()}`,
+    };
 
-    console.log("Analysis complete");
+    console.log("Analysis complete and validated");
 
-    return new Response(JSON.stringify(analysisResult), {
+    return new Response(JSON.stringify(finalResult), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
