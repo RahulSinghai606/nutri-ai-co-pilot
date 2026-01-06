@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Camera, Type, Mic, Upload, Sparkles, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVoiceRecording } from "@/hooks/useVoiceRecording";
+import { compressImage } from "@/lib/imageUtils";
+import { toast } from "sonner";
 
 interface InputBoxProps {
   onAnalyze: (input: { text?: string; imageBase64?: string }) => void;
@@ -14,6 +16,7 @@ export const InputBox = ({ onAnalyze, isProcessing = false }: InputBoxProps) => 
   const [isDragOver, setIsDragOver] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<{ file: File; preview: string } | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -22,24 +25,30 @@ export const InputBox = ({ onAnalyze, isProcessing = false }: InputBoxProps) => 
   });
 
   const handleAnalyze = useCallback(async () => {
-    if ((!text.trim() && !uploadedImage) || isProcessing) return;
+    if ((!text.trim() && !uploadedImage) || isProcessing || isCompressing) return;
 
     let imageBase64: string | undefined;
     
     if (uploadedImage) {
-      imageBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(uploadedImage.file);
-      });
+      try {
+        setIsCompressing(true);
+        // Compress image for mobile - reduces upload size and prevents timeouts
+        imageBase64 = await compressImage(uploadedImage.file, 1200, 0.8);
+      } catch (error) {
+        console.error("Image compression failed:", error);
+        toast.error("Failed to process image. Please try again.");
+        setIsCompressing(false);
+        return;
+      } finally {
+        setIsCompressing(false);
+      }
     }
 
     onAnalyze({
       text: text.trim() || undefined,
       imageBase64,
     });
-  }, [text, uploadedImage, isProcessing, onAnalyze]);
+  }, [text, uploadedImage, isProcessing, isCompressing, onAnalyze]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -84,7 +93,7 @@ export const InputBox = ({ onAnalyze, isProcessing = false }: InputBoxProps) => 
     }
   };
 
-  const canAnalyze = text.trim() || uploadedImage;
+  const canAnalyze = (text.trim() || uploadedImage) && !isCompressing;
 
   const examplePrompts = [
     "Tell me about these ingredients",
@@ -252,15 +261,15 @@ export const InputBox = ({ onAnalyze, isProcessing = false }: InputBoxProps) => 
             </div>
             <Button
               onClick={handleAnalyze}
-              disabled={!canAnalyze || isProcessing}
+              disabled={!canAnalyze || isProcessing || isCompressing}
               className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-soft"
             >
-              {isProcessing ? (
+              {isProcessing || isCompressing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Sparkles className="w-4 h-4" />
               )}
-              Analyze
+              {isCompressing ? "Processing..." : "Analyze"}
             </Button>
           </div>
         </div>
