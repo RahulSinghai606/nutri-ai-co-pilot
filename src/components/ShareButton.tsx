@@ -10,15 +10,82 @@ interface ShareButtonProps {
   analysis: AnalysisResult;
 }
 
+// Check if Web Share API is available (better mobile support)
+const canUseWebShare = () => {
+  return typeof navigator !== "undefined" && 
+         typeof navigator.share === "function" &&
+         navigator.canShare?.({ url: window.location.href, title: "Test" });
+};
+
+// Fallback clipboard copy that works on more browsers
+const copyToClipboardFallback = (text: string): boolean => {
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "-9999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    return successful;
+  } catch {
+    return false;
+  }
+};
+
 export const ShareButton = ({ analysis }: ShareButtonProps) => {
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const copyToClipboard = async (url: string): Promise<boolean> => {
+    // Try modern clipboard API first
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(url);
+        return true;
+      } catch {
+        // Fall through to fallback
+      }
+    }
+    
+    // Fallback for older browsers and some mobile browsers
+    return copyToClipboardFallback(url);
+  };
+
   const handleShare = async () => {
     if (shareUrl) {
-      // Already have a share URL, just copy it
-      copyToClipboard(shareUrl);
+      // Already have a share URL, use Web Share API on mobile or copy
+      if (canUseWebShare()) {
+        try {
+          await navigator.share({
+            title: analysis.productName || "NutriSense Analysis",
+            text: `Check out this ingredient analysis: ${analysis.summary?.slice(0, 100)}...`,
+            url: shareUrl,
+          });
+          toast.success("Shared successfully!");
+          return;
+        } catch (err) {
+          // User cancelled or share failed, fall through to copy
+          if ((err as Error).name !== "AbortError") {
+            console.log("Share failed, falling back to copy");
+          }
+        }
+      }
+      
+      // Fallback to clipboard copy
+      const success = await copyToClipboard(shareUrl);
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        toast.success("Link copied to clipboard!");
+      } else {
+        // Show the URL in a toast so user can manually copy
+        toast.info(`Share link: ${shareUrl}`, { duration: 10000 });
+      }
       return;
     }
 
@@ -30,10 +97,10 @@ export const ShareButton = ({ analysis }: ShareButtonProps) => {
         verdict: analysis.verdict,
         verdict_explanation: analysis.summary,
         health_score: analysis.healthScore || null,
-        quick_advice: JSON.stringify(analysis.quickAdvice),
+        quick_advice: JSON.stringify(analysis.quickAdvice || []),
         confidence: analysis.confidence,
-        ingredients: JSON.stringify(analysis.categories),
-        tradeoffs: JSON.stringify(analysis.tradeoffs),
+        ingredients: JSON.stringify(analysis.categories || []),
+        tradeoffs: JSON.stringify(analysis.tradeoffs || []),
       };
 
       const { data, error } = await supabase
@@ -42,27 +109,51 @@ export const ShareButton = ({ analysis }: ShareButtonProps) => {
         .select("share_code")
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase error:", error);
+        throw new Error(error.message || "Failed to save analysis");
+      }
+
+      if (!data?.share_code) {
+        throw new Error("No share code returned");
+      }
 
       const url = `${window.location.origin}/share/${data.share_code}`;
       setShareUrl(url);
-      copyToClipboard(url);
-      toast.success("Share link created and copied!");
+      
+      // Try Web Share API first on mobile
+      if (canUseWebShare()) {
+        try {
+          await navigator.share({
+            title: analysis.productName || "NutriSense Analysis",
+            text: `Check out this ingredient analysis: ${analysis.summary?.slice(0, 100)}...`,
+            url: url,
+          });
+          toast.success("Shared successfully!");
+          return;
+        } catch (err) {
+          if ((err as Error).name !== "AbortError") {
+            console.log("Share failed, falling back to copy");
+          }
+        }
+      }
+      
+      // Fallback to clipboard
+      const success = await copyToClipboard(url);
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        toast.success("Share link created and copied!");
+      } else {
+        toast.success("Share link created!");
+        toast.info(`Link: ${url}`, { duration: 10000 });
+      }
     } catch (err) {
       console.error("Failed to create share link:", err);
-      toast.error("Failed to create share link. Please try again.");
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to create share link: ${errorMessage}`);
     } finally {
       setIsSharing(false);
-    }
-  };
-
-  const copyToClipboard = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Failed to copy to clipboard");
     }
   };
 

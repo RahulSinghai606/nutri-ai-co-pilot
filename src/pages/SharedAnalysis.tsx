@@ -39,6 +39,48 @@ export default function SharedAnalysis() {
         return;
       }
 
+      // Parse JSON fields that were stringified on insert
+      let quickAdvice: string[] = [];
+      let categories: IngredientCategory[] = [];
+      let tradeoffs: Tradeoff[] = [];
+
+      try {
+        // Handle quick_advice - could be a string (JSON) or already an array
+        if (typeof data.quick_advice === "string") {
+          quickAdvice = JSON.parse(data.quick_advice);
+        } else if (Array.isArray(data.quick_advice)) {
+          quickAdvice = data.quick_advice as string[];
+        }
+      } catch (e) {
+        console.error("Failed to parse quick_advice:", e);
+      }
+
+      try {
+        // Handle ingredients - could be a string (JSON) or already an array
+        if (typeof data.ingredients === "string") {
+          categories = JSON.parse(data.ingredients);
+        } else if (Array.isArray(data.ingredients)) {
+          categories = data.ingredients as unknown as IngredientCategory[];
+        } else if (data.ingredients && typeof data.ingredients === "object") {
+          categories = data.ingredients as unknown as IngredientCategory[];
+        }
+      } catch (e) {
+        console.error("Failed to parse ingredients:", e);
+      }
+
+      try {
+        // Handle tradeoffs - could be a string (JSON) or already an array
+        if (typeof data.tradeoffs === "string") {
+          tradeoffs = JSON.parse(data.tradeoffs);
+        } else if (Array.isArray(data.tradeoffs)) {
+          tradeoffs = data.tradeoffs as unknown as Tradeoff[];
+        } else if (data.tradeoffs && typeof data.tradeoffs === "object") {
+          tradeoffs = data.tradeoffs as unknown as Tradeoff[];
+        }
+      } catch (e) {
+        console.error("Failed to parse tradeoffs:", e);
+      }
+
       // Transform database row to AnalysisResult
       setAnalysis({
         id: data.id,
@@ -46,10 +88,10 @@ export default function SharedAnalysis() {
         verdict: data.verdict as AnalysisResult["verdict"],
         summary: data.verdict_explanation || "",
         healthScore: data.health_score || 50,
-        quickAdvice: (data.quick_advice as unknown as string[]) || [],
+        quickAdvice,
         confidence: data.confidence || 75,
-        categories: (data.ingredients as unknown as IngredientCategory[]) || [],
-        tradeoffs: (data.tradeoffs as unknown as Tradeoff[]) || [],
+        categories,
+        tradeoffs,
         contextNote: "",
       });
       setLoading(false);
