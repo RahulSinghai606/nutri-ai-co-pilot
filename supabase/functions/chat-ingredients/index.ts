@@ -86,6 +86,55 @@ function validateRequest(body: unknown): {
   };
 }
 
+// Helper to call Gemini API directly
+async function callGeminiDirect(systemPrompt: string, messages: Message[]) {
+  const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+  if (!GEMINI_API_KEY) return null;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
+
+  // Convert messages to Gemini format
+  const contents = messages
+    .filter(m => m.role !== "system")
+    .map(m => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }]
+    }));
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { temperature: 0.7 }
+      }),
+    });
+
+    if (response.status === 429 || response.status === 503) {
+      console.log("Gemini quota exceeded, falling back to Lovable AI");
+      return null;
+    }
+
+    if (!response.ok) {
+      console.error("Gemini API error:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (content) {
+      console.log("Used Gemini API directly");
+      return content;
+    }
+    return null;
+  } catch (e) {
+    console.error("Gemini API call failed:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   // Log origin for monitoring
   logOrigin(req);
@@ -107,11 +156,6 @@ serve(async (req) => {
     }
 
     const { question, analysisContext, conversationHistory } = validateRequest(body);
-    
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("Service configuration error");
-    }
 
     const systemPrompt = `You are NutriSense AI, a warm and knowledgeable food scientist. You're having a follow-up conversation about a food product the user just analyzed.
 
@@ -139,7 +183,7 @@ Use phrases like:
 - "The research suggests..."
 - "If you're concerned about..."`;
 
-    const messages = [
+    const messages: Message[] = [
       { role: "system", content: systemPrompt },
       ...conversationHistory,
       { role: "user", content: question }
@@ -147,33 +191,41 @@ Use phrases like:
 
     console.log("Processing chat request");
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages,
-        temperature: 0.7,
-      }),
-    });
+    // Try Gemini API first (uses your quota), fallback to Lovable AI
+    let content = await callGeminiDirect(systemPrompt, messages);
+    
+    if (!content) {
+      console.log("Using Lovable AI as fallback");
+      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+      if (!LOVABLE_API_KEY) throw new Error("Service configuration error");
 
-    if (!response.ok) {
-      console.error("AI Gateway error:", response.status);
-      
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error("AI Gateway error:", response.status);
+        if (response.status === 429) {
+          return new Response(
+            JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        throw new Error("Chat service temporarily unavailable");
       }
-      throw new Error("Chat service temporarily unavailable");
-    }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+      const data = await response.json();
+      content = data.choices?.[0]?.message?.content;
+    }
 
     if (!content) {
       throw new Error("No response generated");
