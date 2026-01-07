@@ -219,7 +219,8 @@ async function callGeminiDirect(model: string, systemPrompt: string, userContent
   const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
   if (!GEMINI_API_KEY) return null;
 
-  const geminiModel = model.includes("pro") ? "gemini-2.5-pro-preview-06-05" : "gemini-2.5-flash-preview-05-20";
+  // Use stable model names (not preview versions)
+  const geminiModel = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${GEMINI_API_KEY}`;
 
   // Convert OpenAI-style content to Gemini format
